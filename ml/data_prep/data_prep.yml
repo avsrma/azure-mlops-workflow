@@ -1,0 +1,27 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+# <component>
+name: data_prep_credit_defaults
+display_name: "Data preparation for training"
+# version: 2 # Not specifying a version will automatically update the version
+type: command
+inputs:
+  data: 
+    type: uri_folder
+  test_train_ratio: 
+    type: number
+outputs:
+  train_data:
+    type: uri_folder
+    mode: rw_mount
+  test_data:
+    type: uri_folder
+    mode: rw_mount
+code: .
+environment: azureml://registries/<workspace>-registry/environments/dev-environment/versions/1
+command: >-
+  python data_prep.py 
+  --data ${{inputs.data}} 
+  --test_train_ratio ${{inputs.test_train_ratio}} 
+  --train_data ${{outputs.train_data}} 
+  --test_data ${{outputs.test_data}} 
+# </component>

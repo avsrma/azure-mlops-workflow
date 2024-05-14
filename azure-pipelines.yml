@@ -1,0 +1,200 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- main
+
+jobs:
+- job: SubmitAzureMLJob
+  displayName: Submit Pipeline Job 
+
+  pool:
+    vmImage: ubuntu-latest
+
+  steps:
+  - script: echo Hello, world!
+    displayName: 'Run a one-line script'
+
+  - task: AzureCLI@2
+    displayName: 'Add AzureML CLI Extension'
+    inputs:
+      azureSubscription: 'ml-rg-connection'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: 'az extension add -n ml -y'
+
+  - task: AzureCLI@2
+    name: submit_azureml_job_task
+    displayName: 'Submit Job'
+    inputs:
+      azureSubscription: 'ml-rg-connection'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        run_id=$(az ml job create --file mlops/pipeline-job.yml --resource-group $(RESOURCE_GROUP) --workspace-name $(WORKSPACE_NAME) --query name --output tsv)
+
+        # Set output variable for next task
+        echo "##vso[task.setvariable variable=JOB_NAME]$run_id"
+
+        if [[ -z "$run_id" ]]
+        then
+          echo "Job creation failed"
+          exit 3
+        fi
+
+        az ml job show --name $run_id --resource-group $(RESOURCE_GROUP) --workspace-name $(WORKSPACE_NAME) --web
+        status=$(az ml job show --name $run_id --resource-group $(RESOURCE_GROUP) --workspace-name $(WORKSPACE_NAME) --query status -o tsv)
+
+        if [[ -z "$status" ]]
+        then
+          echo "Status query failed"
+          exit 4
+        fi
+
+        running=("NotStarted" "Queued" "Starting" "Preparing" "Running" "Finalizing")
+
+        while [[ ${running[*]} =~ $status ]]
+        do
+          sleep 15 
+          status=$(az ml job show --name $run_id --resource-group $(RESOURCE_GROUP) --workspace-name $(WORKSPACE_NAME) --query status -o tsv)
+          echo $status
+        done
+
+        if [[ "$status" != "Completed" ]]  
+        then
+          echo "Training Job failed"
+          exit 3
+        fi
+
+  - task: AzureCLI@2
+    name: register_components_task
+    displayName: 'Share Components to Registry'
+    inputs:
+      azureSubscription: 'ml-rg-connection'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        echo "Updating components in registry..." 
+
+        env_name="dev-environment"
+        env_version=$(az ml environment list --name ${env_name} --registry-name  ${WORKSPACE_NAME}-registry --resource-group ${RESOURCE_GROUP} --query '[0].version' | sed 's/"//g')
+        env_registry="azureml://registries/${WORKSPACE_NAME}-registry/environments/$env_name/versions/$env_version"
+
+        for file in ml/*/*.yml; do
+            az ml component create -f $file --resource-group ${RESOURCE_GROUP} --workspace-name ${WORKSPACE_NAME} --registry-name ${WORKSPACE_NAME}-registry --set environment=$env_registry
+        done
+
+  - task: AzureCLI@2
+    name: register_model_task
+    displayName: 'Share Model to Registry'
+    inputs:
+      azureSubscription: 'ml-rg-connection'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        # Change model name as necessary 
+        name="credit_model_auto"
+
+        latest_model=$(az ml model list --name $name --workspace-name $(WORKSPACE_NAME) --resource-group $(RESOURCE_GROUP) --query '[0]')
+
+        # If no model is found, print and fail
+        [[ -z "$latest_model" ]] && { echo "Model was not registered for this job." ; exit 1; }
+
+        model_name=$(echo "$latest_model" | jq -r '.name')
+        version=$(echo "$latest_model" | jq -r '.version')
+
+        # Store model name for next steps 
+        echo "##vso[task.setvariable variable=REG_MODEL_NAME]$model_name"
+        echo "##vso[task.setvariable variable=REG_MODEL_VERSION]$version"
+
+        # Share to registry 
+        az ml model share --name $model_name --share-with-name $model_name --share-with-version $version --version $version --resource-group $(RESOURCE_GROUP) --workspace-name $(WORKSPACE_NAME) --registry-name $(WORKSPACE_NAME)-registry
+
+        # Write to a file
+        echo $latest_model > model.json
+
+  - publish: model.json
+    displayName: Publish model artifact 
+    artifact: model
+
+  - task: PublishBuildArtifacts@1
+    displayName: Publish deployment scripts as artifact
+    inputs:
+      PathtoPublish: 'deploy'
+      ArtifactName: 'deploy'
+
+  - script: |
+      echo Add other tasks to build, test, and deploy your project.
+      echo See https://aka.ms/yaml
+    displayName: 'Run a multi-line script'
+
+  - task: AzureCLI@2
+    name: create_endpoint_task
+    displayName: 'Create Endpoint'
+    inputs:
+      azureSubscription: 'ml-rg-connection'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        set +x
+        # Check if "auto" endpoint exists 
+        existing_ep=$(az ml online-endpoint list --query "[?starts_with(name, 'auto')]" --resource-group $RESOURCE_GROUP --workspace-name $WORKSPACE_NAME | jq -r '.[0].name')
+        
+        # Check if endpoint already exists, else create new 
+        if [ ! -z "$existing_ep" ]; then
+            echo "Endpoint exists."
+            export ENDPOINT_NAME=$existing_ep
+            # Set output variable for next task
+            echo "##vso[task.setvariable variable=ENDPOINT_NAME]$existing_ep"
+
+        else
+            echo "Creating new endpoint..."
+
+            # Generate a random name
+            export ENDPOINT_NAME=auto-ep-credit-default-`echo $RANDOM`
+
+            # Set output variable for next task
+            echo "##vso[task.setvariable variable=ENDPOINT_NAME]$ENDPOINT_NAME"
+
+            # <create_endpoint>
+            az ml online-endpoint create --name $ENDPOINT_NAME -f deploy/endpoint.yml --resource-group $(RESOURCE_GROUP) --workspace-name $(WORKSPACE_NAME)
+            # </create_endpoint>
+
+        fi 
+
+        # Check if endpoint creation was successful
+        endpoint_status=$(az ml online-endpoint show --name $ENDPOINT_NAME --resource-group $(RESOURCE_GROUP) --workspace-name $(WORKSPACE_NAME) --query "provisioning_state" --output tsv)
+
+        echo $endpoint_status
+        set -x
+        if [[ $endpoint_status == "Succeeded" ]]
+        then
+          echo "Endpoint created successfully"
+        else
+          echo "Endpoint creation failed"
+          exit 1
+        fi
+
+  - task: AzureCLI@2
+    name: create_deployment_task
+    displayName: 'Create Deployment'
+    inputs:
+      azureSubscription: 'ml-rg-connection'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: | 
+        set +x
+        existing_deployment=$(az ml online-deployment list --endpoint-name $(ENDPOINT_NAME) --resource-group $(RESOURCE_GROUP) --workspace-name $(WORKSPACE_NAME) | jq -r '.[0].name')
+
+        # Check if deployment already exists, else create new 
+        if [ ! -z "$existing_deployment" ]; then
+            echo "Deployment exists. Updating existing ..."
+            az ml online-deployment update -f deploy/blue-deployment.yml --set model=azureml://registries/$(WORKSPACE_NAME)-registry/models/$(REG_MODEL_NAME)/versions/$(REG_MODEL_VERSION) endpoint_name=$(ENDPOINT_NAME) --resource-group $(RESOURCE_GROUP) --workspace-name $(WORKSPACE_NAME) 
+        
+        else           
+            # Create deployment 
+            echo "No existing deployment found. Creating new ..."
+            az ml online-deployment create -f deploy/blue-deployment.yml --set model=azureml://registries/$(WORKSPACE_NAME)-registry/models/$(REG_MODEL_NAME)/versions/$(REG_MODEL_VERSION) endpoint_name=$(ENDPOINT_NAME) --resource-group $(RESOURCE_GROUP) --workspace-name $(WORKSPACE_NAME) --all-traffic
+        fi

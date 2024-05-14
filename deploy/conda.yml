@@ -1,0 +1,19 @@
+channels:
+- conda-forge
+dependencies:
+- python=3.8.18
+- pip=21.3.1
+- pip:
+  - matplotlib~=3.5.0
+  - psutil~=5.8.0
+  - tqdm~=4.62.0
+  - pandas~=1.3.0
+  - scipy~=1.7.0
+  - numpy~=1.21.0
+  - ipykernel~=6.0
+  - azureml-core==1.37.0
+  - azureml-defaults==1.37.0
+  - azureml-mlflow==1.37.0
+  - azureml-telemetry==1.37.0
+  - scikit-learn~=1.0.0
+name: mlflow-env

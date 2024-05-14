@@ -1,0 +1,6 @@
+$schema: https://azuremlschemas.azureedge.net/latest/managedOnlineDeployment.schema.json
+name: blue
+endpoint_name: endpt-30728
+model: azureml://registries/<workspace>-registry/models/credit_model_auto/versions/5
+instance_type: Standard_F4s_v2
+instance_count: 1

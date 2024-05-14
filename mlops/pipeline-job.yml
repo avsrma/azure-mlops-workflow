@@ -1,0 +1,35 @@
+# Manage Inputs Outputs in Pipelines
+# https://learn.microsoft.com/en-us/azure/machine-learning/how-to-manage-inputs-outputs-pipeline
+$schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
+type: pipeline
+experiment_name: credit_default_auto
+display_name: credit_auto
+compute: azureml:cpu-cluster
+
+jobs:
+  data_preprocess_job:
+    type: command
+    component: azureml:data_prep_credit_defaults@latest
+    inputs:
+      data: 
+        type: uri_file
+        path: ../data/default_data.csv
+      test_train_ratio: 0.25
+    outputs: 
+      train_data: 
+        mode: upload
+      test_data: 
+        mode: upload
+    # data_prep/data_prep.yml
+
+  training_job:
+    type: command
+    component: azureml:train_credit_defaults_model@latest
+    inputs:
+      train_data: ${{parent.jobs.data_preprocess_job.outputs.train_data}}
+      test_data: ${{parent.jobs.data_preprocess_job.outputs.test_data}}
+      learning_rate: 0.1
+      registered_model_name: credit_model_auto
+    outputs:
+      model: ${{parent.outputs.model}}
+      # train/train.yml

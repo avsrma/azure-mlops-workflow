@@ -1,0 +1,36 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+
+# path: Set the URI path for the data. Supported paths include
+# local: `./<path>
+# Blob: wasbs://<container_name>@<account_name>.blob.core.windows.net/<path>
+# ADLS: abfss://<file_system>@<account_name>.dfs.core.windows.net/<path>
+# Datastore: azureml://datastores/<data_store_name>/paths/<path>
+# Data Asset: azureml:<my_data>:<version>
+
+# type: What type of data are you pointing to?
+# uri_file (a specific file)
+# uri_folder (a folder)
+# mltable (a table)
+
+# mode: Set INPUT mode:
+# ro_mount (read-only mount)
+# download (download from storage to node)
+# mode: Set the OUTPUT mode
+# rw_mount (read-write mount)
+# upload (upload data from node to storage)
+
+type: command
+command: cp ${{inputs.input_data}} ${{outputs.output_data}}
+compute: azureml:cpu-cluster
+environment: azureml://registries/azureml/environments/python-sdk-v2/versions/14
+inputs:
+  input_data:
+    mode: download
+    path: azureml:https://azuremlexamples.blob.core.windows.net/datasets/credit_card/default_of_credit_card_clients.csv
+    type: uri_file
+outputs:
+  output_data:
+    mode: rw_mount
+    path: azureml://datastores/workspaceblobstore/paths/credit_card/default_of_credit_card_clients.csv
+    type: uri_file
+    name: job_output_credit_defaults

@@ -1,0 +1,14 @@
+# Reference
+# https://learn.microsoft.com/en-us/cli/azure/ml/registry?view=azure-cli-latest#az-ml-registry-create
+
+name: sample-registry
+tags:
+  description: Sample Azure ML registry
+location: westeurope
+replication_locations:
+  - location: westeurope
+    # Using Azure Blob Storage 
+    # Review modifications here: https://learn.microsoft.com/en-us/azure/storage/common/storage-account-overview#types-of-storage-accounts
+    storage_config: 
+      storage_account_hns: False  # Datalake storage may require setting this parameter to True
+      storage_account_type: Standard_LRS

@@ -1,0 +1,8 @@
+$schema: https://azuremlschemas.azureedge.net/latest/data.schema.json
+# YML Reference: https://learn.microsoft.com/en-us/azure/machine-learning/reference-yaml-data?view=azureml-api-2
+# Github examples: https://github.com/Azure/azureml-examples/tree/main/cli/assets/data
+name: data-credit-default
+description: Dataset for credit default model
+type: uri_folder
+version: 1
+path: data/
